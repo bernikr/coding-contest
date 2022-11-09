@@ -1,0 +1,20 @@
+13
+start
+var variable value
+call 2
+end
+start
+try
+try
+print something
+var variable newvalue
+end
+catch
+print variablealreadyinitialised
+end
+print test
+end
+catch
+print asd
+end
+end
