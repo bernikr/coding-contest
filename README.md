@@ -8,3 +8,4 @@ This repository contains the bearly working and undocumented code I produce duri
 | 35th Classic CCC | [link](35/src) | 5 | 03:38:46 | **3** / 96 | **10** / 1091 |
 | 36th Classic CCC | [link](36/src) | 5 | 02:46:08 | **8** / 147 | **67** / 1248 |
 | 37th Classic CCC | [link](37/src) | 4 | 02:47:52 | **28** / 149 | **196** / 1294 |
+| 38th Classic CCC | [link](38/src) | 6 | 03:23:30 | **8** / 164 | **37** / 1555 |
