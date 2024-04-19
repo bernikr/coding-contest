@@ -77,7 +77,7 @@ if __name__ == '__main__':
     level = os.path.basename(__file__).split('.py')[0]
     print(os.getcwd())
 
-    leveldir = '../levels/' + level + '/'
+    leveldir = os.path.join(os.path.dirname(__file__), '../levels/' + level + '/')
     for file in os.listdir(leveldir):
         infile = leveldir + file
 
