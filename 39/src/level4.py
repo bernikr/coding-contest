@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from functools import reduce
-from itertools import accumulate, count
-import math
-from multiprocessing import Pool
+import filecmp
+import functools
 import operator
-import os
 import random
-from typing import List
+import re
+import sys
+from collections import Counter, defaultdict
+from itertools import accumulate, count
+from pathlib import Path
+from typing import List, Iterator
 
-from tqdm import tqdm
+from tqdm.contrib import tmap
+from tqdm.contrib.concurrent import thread_map
+
 
 class Vec(tuple[int, ...]):
     def __new__(cls, *args: int | float) -> Vec:
@@ -37,99 +40,127 @@ class Vec(tuple[int, ...]):
     def manhatten(self):
         return sum(abs(x) for x in self)
 
+
 class Box:
     def __init__(self, *corners):
         corners = [tuple(c) for c in corners]
         self.lower = Vec(*map(min, zip(*corners)))
         self.upper = Vec(*map(max, zip(*corners)))
 
-dirs = {"W": Vec(0,-1), "A": Vec(-1,0),  "S": Vec(0,1), "D": Vec(1,0)}
+
+dirs = {"W": Vec(0, -1), "A": Vec(-1, 0), "S": Vec(0, 1), "D": Vec(1, 0)}
 
 
-def run_level(infile: str, input: List[str], outfile: str) -> str:
+def split_input(inp: List[str]) -> Iterator[tuple]:
     i = 1
-    res = ""
-    with tqdm(total=len(input), initial=1) as pbar:
-        while i < len(input):
-            width, height = Vec(*map(int, input[i].split(' ')))
-            mapp = {Vec(x,y): input[i+1+y][x] for x in range(width) for y in range(height)}
-            i += height + 1
-            res += f"{run_yard(mapp)}\n"
-            pbar.update(height + 1)
-        return res[:-1]
-
-def run_yard_mp(mapp):
-    with Pool(processes=16) as pool:
-        multiple_results = [pool.apply_async(run_yard, mapp) for i in range(16)]
-        print([res.get(timeout=1) for res in multiple_results])
+    while i < len(inp):
+        width, height = Vec(*map(int, inp[i].split(" ")))
+        mapp = {Vec(x, y): inp[i + 1 + y][x] for x in range(width) for y in range(height)}
+        i += height + 1
+        yield (mapp,)
 
 
-def run_yard(mapp):
-    mapp = defaultdict(lambda: '#', mapp)
+def solve(mapp) -> str:
+    mapp = defaultdict(lambda: "#", mapp)
     path = ""
-    poss = [[p for p, c in mapp.items() if c=="X"][0]+dirs[random.choice("WASD")]] #maybe?
+    poss = [[p for p, c in mapp.items() if c == "X"][0] + dirs[random.choice("WASD")]]  # maybe?
     d = random.choice("WASD")
     for i in count():
         pos = poss[-1]
-        opts = [x for x in "WASD" if mapp[pos+dirs[x]] == "." and pos+dirs[x] not in poss]
+        opts = [x for x in "WASD" if mapp[pos + dirs[x]] == "." and pos + dirs[x] not in poss]
 
-        if d in opts and not (len(path)>3 and path[-3] == path[-2] !=path[-1]) and mapp[pos+2*dirs[d]]==".":
+        if d in opts and not (len(path) > 3 and path[-3] == path[-2] != path[-1]) and mapp[pos + 2 * dirs[d]] == ".":
             path += d
-            poss.append(pos+dirs[d])
+            poss.append(pos + dirs[d])
         else:
             if opts:
                 d = random.choice(opts)
                 path += d
-                poss.append(pos+dirs[d])
+                poss.append(pos + dirs[d])
             else:
                 if validate_path(mapp, path):
                     return path
                 else:
                     if i < 1000 or i % 2 == 0:
-                        poss = [[p for p, c in mapp.items() if c=="X"][0]+dirs[random.choice("WASD")]]
+                        poss = [[p for p, c in mapp.items() if c == "X"][0] + dirs[random.choice("WASD")]]
                     else:
                         poss = [random.choice([p for p, c in mapp.items() if c == "."])]
                     path = ""
-
-
-
     return path
 
+
 def validate_path(mapp, path):
-    poss = [Vec(0,0)] + list(accumulate((dirs[l] for l in path), operator.add))
+    poss = [Vec(0, 0)] + list(accumulate((dirs[l] for l in path), operator.add))
     mins = Vec(*map(min, zip(*poss)))
-    poss = [p-mins for p in poss]
-    return max(Counter(poss).values()) == 1 and all(c in poss for c, t in mapp.items() if t == '.') and all(mapp.get(p, '#') == '.' for p in poss)
+    poss = [p - mins for p in poss]
+    return max(Counter(poss).values()) == 1 and all(c in poss for c, t in mapp.items() if t == ".") and all(
+        mapp.get(p, "#") == "." for p in poss)
 
 
 #####################################
-
-def is_input_file(infile: str) -> bool:
-    return infile.endswith('.in')
-
-
-def get_outfile(infile: str) -> str:
-    return infile.split('.in')[0] + '.out'
+WORKERS = 1
+RECOMPUTE = False
+CACHING = True
 
 
-if __name__ == '__main__':
-    level = os.path.basename(__file__).split('.py')[0]
-    print(os.getcwd())
+def _main():
+    level = Path(__file__).name.split(".py")[0]
+    leveldir = Path(__file__).parents[1] / "levels" / level
+    partsdir = leveldir / "parts"
 
-    leveldir = os.path.join(os.path.dirname(__file__), '../levels/' + level + '/')
-    for file in os.listdir(leveldir):
-        infile = leveldir + file
+    def _solve(inp, index, outfile):
+        if not CACHING:
+            return solve(*inp)
+        partfile = partsdir / (outfile.name + f".{index}")
+        if partfile.exists():
+            with partfile.open() as f:
+                return f.read()
+        else:
+            res = solve(*inp)
+            with partfile.open(mode="w") as f:
+                f.write(res)
+            return res
 
-        if not is_input_file(infile):
-            continue
-
-        with open(infile) as f:
+    def _run_file(infile, outfile):
+        with open(leveldir / infile) as f:
             content = f.readlines()
 
-        outfile = get_outfile(infile)
-        result = run_level(infile, content, outfile)
+        print(f"{infile.name}")
+        preprocessed_input = list(split_input(content))
 
-        if result and len(result) > 0:
-            with open(outfile, 'w') as f:
-                f.write(result)
-                f.write('\n')
+        if WORKERS > 1:
+            cmap = functools.partial(thread_map, max_workers=WORKERS)
+        else:
+            cmap = tmap
+        cmap = functools.partial(cmap, miniters=1, file=sys.stdout, mininterval=0)
+        results = list(cmap(functools.partial(_solve, outfile=outfile), preprocessed_input, count()))
+
+        if results and len(results) > 0:
+            with open(leveldir / outfile, "w") as f:
+                f.write("\n".join(results))
+                f.write("\n")
+
+    if CACHING:
+        partsdir.mkdir(exist_ok=True)
+        if RECOMPUTE:
+            for f in partsdir.iterdir():
+                f.unlink()
+
+    for file in leveldir.iterdir():
+        if re.match(r"level\d+_\d+\.out", file.name):
+            file.unlink()
+
+    example_in_file = leveldir / (level + "_example.in")
+    _run_file(example_in_file, example_in_file.with_suffix(".out.computed"))
+    if filecmp.cmp(example_in_file.with_suffix(".out"), example_in_file.with_suffix(".out.computed")):
+        print("✅ Example check passed")
+    else:
+        print("⚠️ Example check failed")
+
+    for file in leveldir.iterdir():
+        if re.match(r"level\d+_\d+\.in", file.name):
+            _run_file(file, file.with_suffix(".out"))
+
+
+if __name__ == "__main__":
+    _main()

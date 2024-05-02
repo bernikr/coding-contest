@@ -1,3 +1,4 @@
 .idea/
 .empty
 !_template/**/.empty
+**/parts/*
