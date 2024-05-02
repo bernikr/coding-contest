@@ -1,39 +1,95 @@
-import os
-from typing import List
+from __future__ import annotations
+
+import filecmp
+import re
+import sys
+from functools import partial
+from itertools import count
+from pathlib import Path
+from typing import List, Iterator
+
+from tqdm.contrib import tmap
+from tqdm.contrib.concurrent import thread_map
 
 
-def run_level(infile: str, input: List[str], outfile: str) -> str:
-    return str(len(input))
+##################################################
+
+def split_input(inp: List[str]) -> Iterator[tuple]:
+    for line in inp:
+        yield (line,)  # output tuple will be input params of solve method
 
 
-#####################################
-
-def is_input_file(infile: str) -> bool:
-    return infile.endswith('.in')
+def solve(line) -> str:
+    return str(len(line))
 
 
-def get_outfile(infile: str) -> str:
-    return infile.split('.in')[0] + '.out'
+##################################################
+WORKERS = 1
+RECOMPUTE = True
+CACHING = True
 
 
-if __name__ == '__main__':
-    level = os.path.basename(__file__).split('.py')[0]
-    print(os.getcwd())
+def _main():
+    level = Path(__file__).name.split(".py")[0]
+    leveldir = Path(__file__).parents[1] / "levels" / level
+    partsdir = leveldir / "parts"
 
-    leveldir = os.path.join(os.path.dirname(__file__), '../levels/' + level + '/')
-    for file in os.listdir(leveldir):
-        infile = leveldir + file
+    def _solve(inp, index, outfile):
+        if not CACHING:
+            return solve(*inp)
+        partfile = partsdir / (outfile.name + f".{index}")
+        if partfile.exists():
+            with partfile.open() as f:
+                return f.read()
+        else:
+            res = solve(*inp)
+            with partfile.open(mode="w") as f:
+                f.write(res)
+            return res
 
-        if not is_input_file(infile):
-            continue
-
-        with open(infile) as f:
+    def _run_file(infile, outfile):
+        with open(leveldir / infile) as f:
             content = f.readlines()
 
-        outfile = get_outfile(infile)
-        result = run_level(infile, content, outfile)
+        print(f"{infile.name}")
+        preprocessed_input = list(split_input(content))
 
-        if result and len(result) > 0:
-            with open(outfile, 'w') as f:
-                f.write(result)
-                f.write('\n')
+        if WORKERS > 1:
+            cmap = partial(thread_map, max_workers=WORKERS)
+        else:
+            cmap = tmap
+        cmap = partial(cmap, miniters=1, file=sys.stdout, mininterval=0)
+        results = list(cmap(partial(_solve, outfile=outfile), preprocessed_input, count()))
+
+        if results and len(results) > 0:
+            with open(leveldir / outfile, "w") as f:
+                f.write("\n".join(results))
+                f.write("\n")
+
+    if CACHING:
+        partsdir.mkdir(exist_ok=True)
+        if RECOMPUTE:
+            for f in partsdir.iterdir():
+                f.unlink()
+
+    for file in leveldir.iterdir():
+        if re.match(r"level\d+_\d+\.out", file.name):
+            file.unlink()
+
+    example_in_file = leveldir / (level + "_example.in")
+    if not example_in_file.exists():
+        print("⚠️ No example file found")
+    else:
+        _run_file(example_in_file, example_in_file.with_suffix(".out.computed"))
+        if filecmp.cmp(example_in_file.with_suffix(".out"), example_in_file.with_suffix(".out.computed")):
+            print("✅ Example check passed")
+        else:
+            print("⚠️ Example check failed")
+
+    for file in leveldir.iterdir():
+        if re.match(r"level\d+_\d+\.in", file.name):
+            _run_file(file, file.with_suffix(".out"))
+
+
+if __name__ == "__main__":
+    _main()
