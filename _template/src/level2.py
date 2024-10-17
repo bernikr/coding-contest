@@ -7,6 +7,7 @@ from typing import List, Iterator
 
 ##################################################
 
+
 def split_input(inp: List[str]) -> Iterator[tuple]:
     for line in inp:
         yield (line,)  # output tuple will be input params of solve and validate method
@@ -65,7 +66,10 @@ def _solve(inp, index):
         with multiprocessing.Manager() as manager:
             stopping_event = manager.Event()
             with futures.ProcessPoolExecutor(max_workers=WORKERS) as executor:
-                tasks = [executor.submit(_solve_worker, inp, stopping_event) for _ in range(WORKERS)]
+                tasks = [
+                    executor.submit(_solve_worker, inp, stopping_event)
+                    for _ in range(WORKERS)
+                ]
                 futures.wait(tasks, return_when=futures.FIRST_COMPLETED)
                 res = next(futures.as_completed(tasks)).result()
                 stopping_event.set()
@@ -122,7 +126,10 @@ def _main():
         print("⚠️ No example file found")
     else:
         _run_file(example_in_file, example_in_file.with_suffix(".out.computed"))
-        if filecmp.cmp(example_in_file.with_suffix(".out"), example_in_file.with_suffix(".out.computed")):
+        if filecmp.cmp(
+            example_in_file.with_suffix(".out"),
+            example_in_file.with_suffix(".out.computed"),
+        ):
             print("✅ Example check passed")
         else:
             print("⚠️ Example check failed")
